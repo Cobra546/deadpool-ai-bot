@@ -1,1 +1,26 @@
-// Deadpool bot behavior and button logic placeholder
+const $=id=>document.getElementById(id);
+const SYSTEM_PROMPT="You are Deadpool AI, a helpful, witty, energetic assistant created for Usman. Be friendly and playful without being rude. Answer clearly and accurately. The user may write in Roman Urdu, Urdu, or English; naturally reply in the language they use. Never claim to be the actual Marvel character.";
+let chats=[],activeId=null,busy=false;
+const makeId=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+function newChat(){const c={id:makeId(),title:"New chat",messages:[]};chats.unshift(c);activeId=c.id;renderAll();$("promptInput").focus()}
+function activeChat(){return chats.find(c=>c.id===activeId)}
+function save(){try{localStorage.setItem("deadpool-ai-chats",JSON.stringify(chats.slice(0,30)))}catch(e){}}
+function load(){try{chats=JSON.parse(localStorage.getItem("deadpool-ai-chats")||"[]")}catch(e){chats=[]}if(!Array.isArray(chats))chats=[];if(!chats.length)newChat();else{activeId=chats[0].id;renderAll()}}
+function renderAll(){renderList();renderMessages()}
+function renderList(){$("chatList").innerHTML="";chats.slice(0,20).forEach(c=>{const b=document.createElement("button");b.className="chat-item"+(c.id===activeId?" active":"");b.textContent=c.title;b.onclick=()=>{activeId=c.id;renderAll();$("sidebar").classList.remove("open")};$("chatList").append(b)})}
+function renderMessages(){const c=activeChat();$("messages").innerHTML="";$("welcome").style.display=c&&c.messages.length?"none":"block";if(!c)return;c.messages.forEach(m=>addMessage(m.role,m.content,false));$("conversation").scrollTop=$("conversation").scrollHeight}
+function addMessage(role,content,scroll=true){const wrap=document.createElement("div");wrap.className="message "+role;const av=document.createElement("div");av.className="avatar";av.textContent=role==="user"?"U":"D";const body=document.createElement("div");body.className="message-body";const label=document.createElement("div");label.className="message-label";label.textContent=role==="user"?"YOU":"DEADPOOL AI";const text=document.createElement("div");text.textContent=content;body.append(label,text);wrap.append(av,body);$("messages").append(wrap);if(scroll)$("conversation").scrollTop=$("conversation").scrollHeight;return text}
+function toast(s){const t=$("toast");t.textContent=s;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2600)}
+function setEngine(){const e=$("engineSelect").value;const local=e==="ollama";$("engineHint").textContent=local?"Runs on your computer with Ollama":"Uses your private server API key";$("sideEngine").textContent=local?"Local Ollama engine selected":"Cloud API engine selected"}
+async function askCloud(messages){const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({messages:[{role:"system",content:SYSTEM_PROMPT},...messages]})});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||"Cloud API request failed ("+r.status+")");return data.reply}
+async function askLocal(messages){const base=(localStorage.getItem("deadpool-ollama-url")||"http://localhost:11434").replace(/\/$/,"");const model=localStorage.getItem("deadpool-ollama-model")||"qwen2.5:3b";const r=await fetch(base+"/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model,messages:[{role:"system",content:SYSTEM_PROMPT},...messages],stream:false})});if(!r.ok)throw new Error("Ollama request failed. Check Ollama is running and its browser origins are allowed.");const data=await r.json();return data.message?.content||"No response from local model."}
+async function send(text){if(busy||!text.trim())return;let c=activeChat();if(!c){newChat();c=activeChat()}const userText=text.trim();c.messages.push({role:"user",content:userText});if(c.messages.length===1)c.title=userText.slice(0, thirty=30)+(userText.length>30?"…":"");$("welcome").style.display="none";addMessage("user",userText);$("promptInput").value="";$("promptInput").style.height="auto";renderList();save();busy=true;$("sendBtn").disabled=true;const pending=addMessage("assistant","Thinking…");pending.classList.add("typing");try{const history=c.messages.slice(-20);const reply=$("engineSelect").value==="ollama"?await askLocal(history):await askCloud(history);pending.classList.remove("typing");pending.textContent=reply||"I couldn't produce a reply.";c.messages.push({role:"assistant",content:reply||""});save()}catch(err){pending.classList.remove("typing");pending.textContent="Couldn't connect: "+err.message;toast(err.message)}finally{busy=false;$("sendBtn").disabled=false;$("conversation").scrollTop=$("conversation").scrollHeight}}
+$("chatForm").addEventListener("submit",e=>{e.preventDefault();send($("promptInput").value)});
+$("promptInput").addEventListener("input",e=>{e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,180)+"px"});
+$("promptInput").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();$("chatForm").requestSubmit()}});
+$("newChat").onclick=newChat;
+$("clearChat").onclick=()=>{const c=activeChat();if(c){c.messages=[];c.title="New chat";renderAll();save()}};
+$("engineSelect").onchange=setEngine;
+$("menuBtn").onclick=()=>$("sidebar").classList.toggle("open");
+document.querySelectorAll(".suggestion").forEach(b=>b.onclick=()=>send(b.dataset.prompt));
+load();setEngine();
